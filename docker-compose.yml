@@ -1,0 +1,62 @@
+services:
+  mysql:
+    image: mysql:8.4
+    # innodb-lock-wait-timeout=5: lock waits must fail fast (design section 4).
+    # default-time-zone=+00:00: everything is stored in UTC.
+    command: --innodb-lock-wait-timeout=5 --default-time-zone=+00:00
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: tickets
+      MYSQL_USER: tickets
+      MYSQL_PASSWORD: secret
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  app:
+    build:
+      context: ./docker/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Overrides .env: a stack trace or a secret must never reach a client,
+      # whatever someone has in their local file.
+      APP_DEBUG: "false"
+    volumes:
+      - .:/var/www
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/up"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  scheduler:
+    build:
+      context: ./docker/app
+    command: php artisan schedule:work
+    depends_on:
+      app:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_DEBUG: "false"
+    volumes:
+      - .:/var/www
+
+volumes:
+  mysql-data:
